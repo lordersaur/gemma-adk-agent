@@ -1,0 +1,8 @@
+google-adk>=1.0.0
+google-generativeai
+ollama
+litellm
+python-dotenv
+ddgs
+beautifulsoup4
+prompt_toolkit
