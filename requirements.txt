@@ -6,3 +6,7 @@ python-dotenv
 ddgs
 beautifulsoup4
 prompt_toolkit
+
+fastapi
+uvicorn[standard]
+python-multipart

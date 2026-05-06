@@ -1,4 +1,5 @@
 import os
+import platform
 import requests
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
@@ -7,12 +8,11 @@ from tools import web_search, python, terminal
 
 load_dotenv()
 
-UNSLOTH_BASE_URL = os.getenv("UNSLOTH_BASE_URL", "http://localhost:8888/v1")
+UNSLOTH_BASE_URL = os.getenv("UNSLOTH_BASE_URL", "http://localhost:8080/v1")
 GEMMA_MODEL = os.getenv("GEMMA_MODEL", "gemma-4-E4B-it-UD-Q8_K_XL")
-GGUF_PATH = os.getenv("GGUF_PATH", "")
 API_KEY = os.getenv("UNSLOTH_API_KEY", "")
 
-_studio_base = UNSLOTH_BASE_URL.replace("/v1", "")
+_base_url = UNSLOTH_BASE_URL.replace("/v1", "")
 
 
 def _auth_headers() -> dict:
@@ -22,34 +22,52 @@ def _auth_headers() -> dict:
 
 
 def ensure_model_loaded() -> None:
-    """Load the GGUF into Unsloth Studio if it isn't already loaded."""
     try:
-        status = requests.get(f"{_studio_base}/api/inference/status", headers=_auth_headers(), timeout=5)
-        if status.ok:
-            data = status.json()
-            loaded = data.get("loaded", [])
-            active = data.get("active_model", "")
-            if GGUF_PATH in loaded or GGUF_PATH == active:
-                print(f"[unsloth] model already loaded: {active}")
-                return
+        resp = requests.get(f"{_base_url}/health", headers=_auth_headers(), timeout=5)
+        if resp.ok:
+            print(f"[motor] server ready at {UNSLOTH_BASE_URL}")
+            return
     except requests.RequestException:
         pass
+    raise RuntimeError(f"Backend not reachable at {_base_url} — is the server running?")
 
-    if not GGUF_PATH:
-        print("[unsloth] GGUF_PATH not set — assuming model is already loaded in Studio")
-        return
 
-    print(f"[unsloth] loading {GGUF_PATH} ...")
-    resp = requests.post(
-        f"{_studio_base}/api/inference/load",
-        headers={**_auth_headers(), "Content-Type": "application/json"},
-        json={"model_path": GGUF_PATH},
-        timeout=300,
+def _build_instruction() -> str:
+    cwd = os.getcwd()
+    system = platform.system()
+    release = platform.release()
+    machine = platform.machine()
+    env_info = f"{system} {release} ({machine})"
+    return (
+        "<|think|>"
+        "thinking: LOW\n"
+        f"You are a local development assistant running directly on this machine.\n"
+        f"Runtime environment: {env_info}\n"
+        f"Working directory: {cwd}\n"
+        "You have full access to the local environment through tools:\n"
+        "- web_search: search for documentation, APIs, packages, or any current information.\n"
+        "- python: execute Python code for calculations, data processing, and writing files. "
+        "Always use Python to write files — open('path', 'w').write('''content''') handles any content safely. "
+        "Never print a success message without actually calling open().write() first. "
+        f"Always use absolute paths when writing files (e.g. {cwd}/myproject/src/App.jsx). "
+        "Never use shell redirection or echo to write files.\n"
+        "- terminal: run shell commands — scaffold projects, install packages, run builds, use git. "
+        "The working directory persists across tool calls like a real shell — cd once and it stays. "
+        "For interactive CLI tools that prompt for input, pass flags to skip prompts (e.g. --yes, -y, --force). "
+        "If a target directory already exists, remove it before scaffolding into it. "
+        "Package installs can take several minutes, that is normal. "
+        "Never start long-running processes (dev servers, watchers, daemons) unless the user explicitly asks.\n"
+        "You are an active participant in development, not just an advisor. "
+        "Use tools to actually do things — do not describe changes and wait to be asked. "
+        "Never end a response with a statement about what you are about to do. "
+        "If you are going to use a tool, use it — do not announce it first. "
+        "Write and execute immediately. Only call a tool when needed. Output only the direct answer. "
+        "Do not ask 'what would you like to do next?' mid-task — if the task is clearly not done, keep going. "
+        "Only stop and ask when genuinely blocked or the user's intent is ambiguous."
     )
-    if not resp.ok:
-        raise RuntimeError(f"Failed to load model: {resp.status_code} {resp.text}")
-    print("[unsloth] model loaded.")
 
+
+# ── Model + Agent ──────────────────────────────────────────────────────────────
 
 _model = LiteLlm(
     model=f"openai/{GEMMA_MODEL}",
@@ -60,13 +78,7 @@ _model = LiteLlm(
 root_agent = LlmAgent(
     name="gemma_agent",
     model=_model,
-    description="A helpful assistant powered by Gemma 4 E4B running locally via Unsloth Studio.",
-    instruction=(
-        "You are a helpful, concise assistant with access to tools.\n"
-        "- Use web_search to look up current information.\n"
-        "- Use python to execute Python code and return results.\n"
-        "- Use terminal to run shell commands.\n"
-        "Only call a tool when it is actually needed."
-    ),
+    description="A local development assistant powered by Gemma 4.",
+    instruction=_build_instruction(),
     tools=[web_search, python, terminal],
 )

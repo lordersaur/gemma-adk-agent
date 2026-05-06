@@ -1,0 +1,94 @@
+import json
+import os
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+_LOG_DIR = Path(__file__).parent / "logs"
+_session_id: str = ""
+_jsonl_path: Path | None = None
+_transcript_path: Path | None = None
+
+
+def init_session() -> str:
+    global _session_id, _jsonl_path, _transcript_path
+    _session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    _LOG_DIR.mkdir(exist_ok=True)
+    _jsonl_path = _LOG_DIR / f"{_session_id}_debug.jsonl"
+    _transcript_path = _LOG_DIR / f"{_session_id}_chat.md"
+    model = os.getenv("GEMMA_MODEL", "unknown")
+    base_url = os.getenv("UNSLOTH_BASE_URL", "")
+    _write_transcript(f"# Session {_session_id}\n\n**Model:** `{model}`  \n**Backend:** `{base_url}`\n\n---\n\n")
+    _event("session_start", {"model": model, "base_url": os.getenv("UNSLOTH_BASE_URL", "")})
+    return _session_id
+
+
+def _ts() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _event(type_: str, data: dict) -> None:
+    if _jsonl_path is None:
+        return
+    record = {"ts": _ts(), "type": type_, **data}
+    with _jsonl_path.open("a") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _write_transcript(text: str) -> None:
+    if _transcript_path is None:
+        return
+    with _transcript_path.open("a") as f:
+        f.write(text)
+
+
+# ── public logging API ─────────────────────────────────────────────────────────
+
+def log_user(text: str) -> None:
+    _event("user", {"text": text})
+    _write_transcript(f"### You\n\n{text}\n\n")
+
+
+def log_tool_call(name: str, args: dict) -> None:
+    _event("tool_call", {"name": name, "args": args})
+    args_str = json.dumps(args, ensure_ascii=False, indent=2)
+    _write_transcript(f"#### Tool call: `{name}`\n\n```json\n{args_str}\n```\n\n")
+
+
+def log_tool_result(name: str, result: str) -> None:
+    _event("tool_result", {"name": name, "result": result})
+    _write_transcript(f"#### Tool result: `{name}`\n\n```\n{result[:2000]}\n```\n\n")
+
+
+def log_raw_chunks(chunks: list[str]) -> None:
+    """Log every final-response chunk exactly as received from the model."""
+    _event("llm_raw_chunks", {"chunks": chunks, "count": len(chunks)})
+    for i, chunk in enumerate(chunks, 1):
+        _write_transcript(f"<details><summary>raw chunk {i}/{len(chunks)}</summary>\n\n```\n{chunk}\n```\n\n</details>\n\n")
+
+
+def log_llm_stats(stats: dict) -> None:
+    """Log token counts and timing captured from the LiteLLM callback."""
+    _event("llm_stats", stats)
+    rows = "\n".join(f"| {k} | {v} |" for k, v in stats.items())
+    _write_transcript(f"#### Stats\n\n| key | value |\n|-----|-------|\n{rows}\n\n")
+
+
+def log_thinking(text: str) -> None:
+    _event("thinking", {"text": text})
+    _write_transcript(f"<details><summary>thinking</summary>\n\n{text}\n\n</details>\n\n")
+
+
+def log_response(text: str) -> None:
+    _event("response", {"text": text})
+    _write_transcript(f"### Agent\n\n{text}\n\n---\n\n")
+
+
+def log_error(message: str) -> None:
+    _event("error", {"message": message})
+    _write_transcript(f"> **Error:** {message}\n\n")
+
+
+def session_paths() -> tuple[Path, Path]:
+    """Return (jsonl_path, transcript_path) for the current session."""
+    return _jsonl_path, _transcript_path
