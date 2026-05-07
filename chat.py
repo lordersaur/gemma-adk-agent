@@ -1,8 +1,8 @@
 import asyncio
 import time
+import uuid
 
 from rich.live import Live
-from rich.status import Status
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -16,32 +16,48 @@ import ui
 
 APP_NAME = "gemma-adk-agent"
 USER_ID = "local_user"
-SESSION_ID = "session_001"
+CONTEXT_RESET_THRESHOLD = 18_000
+
+
+async def _new_session(session_service: InMemorySessionService, app_name: str) -> str:
+    session_id = f"session_{uuid.uuid4().hex[:8]}"
+    await session_service.create_session(
+        app_name=app_name, user_id=USER_ID, session_id=session_id
+    )
+    return session_id
 
 
 async def run(model_name: str, app_name: str = APP_NAME) -> None:
     session_service = InMemorySessionService()
-    await session_service.create_session(
-        app_name=app_name, user_id=USER_ID, session_id=SESSION_ID
-    )
+    session_id = await _new_session(session_service, app_name)
 
     from agent import root_agent
     runner = Runner(agent=root_agent, app_name=app_name, session_service=session_service)
 
     ensure_model_loaded()
-    session_id = logger.init_session()
-    jsonl, transcript = logger.session_paths()
+    logger.init_session()
+    _, transcript = logger.session_paths()
 
+    ui.console.clear()
     ui.print_header(model_name)
     ui.console.print(f"[dim]  logs -> {transcript.name}[/dim]\n")
 
-    prompt_session: PromptSession = PromptSession()
+    prompt_session: PromptSession = PromptSession(completer=ui.SlashCompleter())
 
     with patch_stdout(raw=True):
-        await _input_loop(runner, prompt_session)
+        await _input_loop(runner, session_service, session_id, app_name, model_name, prompt_session)
 
 
-async def _input_loop(runner: Runner, prompt_session: PromptSession) -> None:
+async def _input_loop(
+    runner: Runner,
+    session_service: InMemorySessionService,
+    session_id: str,
+    app_name: str,
+    model_name: str,
+    prompt_session: PromptSession,
+) -> None:
+    last_prompt_tokens = 0
+
     while True:
         try:
             user_input = await asyncio.get_event_loop().run_in_executor(
@@ -57,14 +73,40 @@ async def _input_loop(runner: Runner, prompt_session: PromptSession) -> None:
 
         if not user_input:
             continue
-        if user_input.lower() in ("quit", "exit", "q"):
+
+        cmd = user_input.lower()
+
+        if cmd in ("/exit", "/quit"):
             ui.console.print("[dim]bye[/dim]")
             break
+        elif cmd == "/help":
+            ui.print_help()
+            continue
+        elif cmd == "/clear":
+            ui.console.clear()
+            ui.print_header(model_name)
+            continue
+        elif cmd == "/new":
+            session_id = await _new_session(session_service, app_name)
+            logger.log_context_reset(session_id)
+            last_prompt_tokens = 0
+            ui.console.clear()
+            ui.print_header(model_name)
+            ui.print_success("new session — context cleared")
+            continue
+        elif cmd == "/history":
+            jsonl, transcript = logger.session_paths()
+            ui.print_history(jsonl, transcript)
+            continue
+        elif cmd == "/model":
+            from agent import UNSLOTH_BASE_URL
+            ui.print_model_info(model_name, UNSLOTH_BASE_URL)
+            continue
 
         logger.log_user(user_input)
-        task = asyncio.ensure_future(_send(runner, user_input))
+        task = asyncio.ensure_future(_send(runner, session_id, user_input))
         try:
-            await task
+            prompt_tokens = await task
         except (KeyboardInterrupt, asyncio.CancelledError):
             task.cancel()
             try:
@@ -72,6 +114,20 @@ async def _input_loop(runner: Runner, prompt_session: PromptSession) -> None:
             except asyncio.CancelledError:
                 pass
             ui.console.print("\n[dim]interrupted[/dim]\n")
+            continue
+
+        if prompt_tokens:
+            last_prompt_tokens = prompt_tokens
+
+        if last_prompt_tokens >= CONTEXT_RESET_THRESHOLD:
+            summary = logger.build_summary(max_exchanges=20)
+            old_tokens = last_prompt_tokens
+            session_id = await _new_session(session_service, app_name)
+            logger.log_context_reset(session_id)
+            last_prompt_tokens = 0
+            ui.print_session_reset(old_tokens, session_id)
+            if summary:
+                await _send(runner, session_id, f"[Context reset — previous session summary]\n{summary}")
 
 
 def _unwrap_tool_result(response: dict) -> str:
@@ -97,48 +153,73 @@ def _is_tool_call_parse_error(err: str) -> bool:
     return any(m.lower() in err.lower() for m in _PARSE_ERROR_MARKERS)
 
 
-async def _send(runner: Runner, user_input: str) -> None:
+async def _send(runner: Runner, session_id: str, user_input: str) -> int:
     message = Content(role="user", parts=[Part(text=user_input)])
     thinking_buf = ""
     response_buf = ""
     usage_metadata = None
     t_start = time.monotonic()
+    thinking_start: float | None = None
 
-    _status: Status | None = None
-    _live: Live | None = None
-    _thinking_displayed = False
+    _thinking_shown = False
     _response_streamed = False
+    _response_live: Live | None = None
 
-    def _stop_status() -> None:
-        nonlocal _status
-        if _status is not None:
-            _status.stop()
-            _status = None
+    _timer_live: list[Live | None] = [None]
+    _timer_task: list[asyncio.Task | None] = [None]
 
-    def _stop_live() -> None:
-        nonlocal _live
-        if _live is not None:
-            _live.stop()
-            _live = None
+    async def _run_timer() -> None:
+        await asyncio.sleep(2.0)
+        live = ui.make_thinking_live()
+        live.start()
+        _timer_live[0] = live
+        try:
+            while True:
+                elapsed = round(time.monotonic() - (thinking_start or t_start))
+                live.update(ui.render_thinking_status(elapsed))
+                await asyncio.sleep(0.25)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if _timer_live[0] is not None:
+                _timer_live[0].stop()
+                _timer_live[0] = None
+
+    def _cancel_timer() -> None:
+        if _timer_live[0] is not None:
+            _timer_live[0].stop()
+            _timer_live[0] = None
+        if _timer_task[0] is not None and not _timer_task[0].done():
+            _timer_task[0].cancel()
+            _timer_task[0] = None
+
+    def _stop_response_live() -> None:
+        nonlocal _response_live
+        if _response_live is not None:
+            _response_live.stop()
+            _response_live = None
 
     def _flush_thinking() -> None:
-        nonlocal _thinking_displayed
-        if thinking_buf and not _thinking_displayed:
+        nonlocal _thinking_shown
+        if _thinking_shown:
+            return
+        _thinking_shown = True
+        elapsed = round(time.monotonic() - (thinking_start or t_start))
+        if thinking_buf:
             logger.log_thinking(thinking_buf)
-            ui.print_thinking(thinking_buf)
-            _thinking_displayed = True
+        if elapsed >= 2:
+            ui.print_thinking_summary(elapsed)
 
-    # Start waiting indicator
-    _status = ui.make_thinking_status()
-    _status.start()
+    _timer_task[0] = asyncio.ensure_future(_run_timer())
 
     try:
         async for event in runner.run_async(
-            user_id=USER_ID, session_id=SESSION_ID, new_message=message
+            user_id=USER_ID, session_id=session_id, new_message=message
         ):
             for fc in event.get_function_calls():
-                _stop_status()
-                _stop_live()
+                _cancel_timer()
+                _stop_response_live()
+                _flush_thinking()
                 args = dict(fc.args) if fc.args else {}
                 logger.log_tool_call(fc.name, args)
                 ui.print_tool_call(fc.name, args)
@@ -147,10 +228,8 @@ async def _send(runner: Runner, user_input: str) -> None:
                 result = _unwrap_tool_result(fr.response)
                 logger.log_tool_result(fr.name, result)
                 ui.print_tool_result(fr.name, result)
-                # Restart thinking indicator for next model turn
-                if _status is None and _live is None:
-                    _status = ui.make_thinking_status()
-                    _status.start()
+                if _timer_task[0] is None:
+                    _timer_task[0] = asyncio.ensure_future(_run_timer())
 
             if event.usage_metadata:
                 usage_metadata = event.usage_metadata
@@ -166,31 +245,31 @@ async def _send(runner: Runner, user_input: str) -> None:
                 )
 
                 if think_text:
+                    if thinking_start is None:
+                        thinking_start = time.monotonic()
                     thinking_buf += think_text
 
                 if resp_text and event.partial:
-                    # First response token — end thinking phase, start streaming
-                    if _status is not None or not _thinking_displayed:
-                        _stop_status()
-                        _flush_thinking()
-                    if _live is None:
-                        _live = ui.make_response_live()
-                        _live.start()
+                    _cancel_timer()
+                    _flush_thinking()
+                    if _response_live is None:
+                        _response_live = ui.make_response_live()
+                        _response_live.start()
                         _response_streamed = True
                     response_buf += resp_text
-                    _live.update(ui.render_response(response_buf))
+                    _response_live.update(ui.render_response(response_buf))
 
             if event.is_final_response():
-                _stop_status()
+                _cancel_timer()
 
-                # Fallback: if no partial events, collect from final event
-                if not _thinking_displayed and not thinking_buf and event.content:
+                if not _thinking_shown and not thinking_buf and event.content:
                     t = "".join(
                         p.text for p in event.content.parts
                         if p.text and getattr(p, "thought", False)
                     )
                     if t:
                         thinking_buf = t
+                        thinking_start = thinking_start or t_start
 
                 _flush_thinking()
 
@@ -202,11 +281,11 @@ async def _send(runner: Runner, user_input: str) -> None:
                     if r:
                         response_buf = r
 
-                _stop_live()
+                _stop_response_live()
 
     except Exception as e:
-        _stop_status()
-        _stop_live()
+        _cancel_timer()
+        _stop_response_live()
         err = str(e)
         logger.log_error(err)
         if "502" in err or "Lost connection" in err or "crashed" in err:
@@ -228,17 +307,18 @@ async def _send(runner: Runner, user_input: str) -> None:
                 "Do NOT use f-strings for file content. Retry the operation now."
             )
             logger.log_error(f"[auto-recovery] injecting: {recovery}")
-            await _send(runner, recovery)
-            return
+            return await _send(runner, session_id, recovery)
         else:
             ui.print_error(err)
-        return
+        return 0
 
     elapsed_ms = round((time.monotonic() - t_start) * 1000, 1)
+    prompt_tokens = 0
 
     if usage_metadata:
         pt = getattr(usage_metadata, "prompt_token_count", 0) or 0
         ct = getattr(usage_metadata, "candidates_token_count", 0) or 0
+        prompt_tokens = pt
         stats = {
             "elapsed_ms": elapsed_ms,
             "prompt_tokens": pt,
@@ -251,8 +331,9 @@ async def _send(runner: Runner, user_input: str) -> None:
     if response_buf:
         logger.log_raw_chunks([response_buf])
         logger.log_response(response_buf)
-        # Print if we didn't stream it
         if not _response_streamed:
             ui.print_response(response_buf)
     else:
         ui.console.print()
+
+    return prompt_tokens
