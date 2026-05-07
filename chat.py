@@ -18,7 +18,7 @@ import ui
 
 APP_NAME = "gemma-adk-agent"
 USER_ID = "local_user"
-CONTEXT_RESET_THRESHOLD = 18_000
+CONTEXT_RESET_THRESHOLD = 28_000
 
 
 async def _new_session(session_service: InMemorySessionService, app_name: str) -> str:
