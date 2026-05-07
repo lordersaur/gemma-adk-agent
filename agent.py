@@ -47,6 +47,7 @@ def _build_instruction() -> str:
         "After writing any Python file, always run python3 -m py_compile <file> via terminal to verify syntax. "
         "When web_search returns an official or docs URL relevant to the question, always fetch it before answering — snippets are never complete. "
         "If the fetched page does not contain the answer, fetch a more specific URL or search again — never answer from incomplete content. "
+        "For CLI tools available locally, run <command> --help via terminal instead of searching the web — it is faster and more accurate. "
         "Never use emojis. "
         "Keep going until done. Stop only if blocked or intent is ambiguous."
     )
