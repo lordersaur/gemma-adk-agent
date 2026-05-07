@@ -10,16 +10,16 @@ _jsonl_path: Path | None = None
 _transcript_path: Path | None = None
 
 
-def init_session() -> str:
+def init_session(model: str = "", base_url: str = "") -> str:
     global _session_id, _jsonl_path, _transcript_path
     _session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     _LOG_DIR.mkdir(exist_ok=True)
     _jsonl_path = _LOG_DIR / f"{_session_id}_debug.jsonl"
     _transcript_path = _LOG_DIR / f"{_session_id}_chat.md"
-    model = os.getenv("GEMMA_MODEL", "unknown")
-    base_url = os.getenv("UNSLOTH_BASE_URL", "")
+    model = model or os.getenv("GEMMA_MODEL", "unknown")
+    base_url = base_url or os.getenv("UNSLOTH_BASE_URL", "")
     _write_transcript(f"# Session {_session_id}\n\n**Model:** `{model}`  \n**Backend:** `{base_url}`\n\n---\n\n")
-    _event("session_start", {"model": model, "base_url": os.getenv("UNSLOTH_BASE_URL", "")})
+    _event("session_start", {"model": model, "base_url": base_url})
     return _session_id
 
 
@@ -87,6 +87,46 @@ def log_response(text: str) -> None:
 def log_error(message: str) -> None:
     _event("error", {"message": message})
     _write_transcript(f"> **Error:** {message}\n\n")
+
+
+def log_context_reset(new_session_id: str) -> None:
+    _event("context_reset", {"new_session_id": new_session_id})
+    _write_transcript(f"> **Context reset** → session `{new_session_id}`\n\n")
+
+
+def build_summary(max_exchanges: int = 20) -> str:
+    """Read the current JSONL log and produce a compact summary of recent exchanges."""
+    if _jsonl_path is None or not _jsonl_path.exists():
+        return ""
+    exchanges: list[dict] = []
+    current: dict = {}
+    with _jsonl_path.open() as f:
+        for line in f:
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = record.get("type")
+            if t == "user":
+                if current:
+                    exchanges.append(current)
+                current = {"user": record.get("text", ""), "response": "", "tools": []}
+            elif t == "tool_call" and current:
+                current["tools"].append(record.get("name", ""))
+            elif t == "response" and current:
+                current["response"] = record.get("text", "")
+    if current:
+        exchanges.append(current)
+
+    recent = exchanges[-max_exchanges:]
+    lines = []
+    for ex in recent:
+        tools_note = f" [tools: {', '.join(ex['tools'])}]" if ex["tools"] else ""
+        lines.append(f"User: {ex['user']}{tools_note}")
+        if ex["response"]:
+            snippet = ex["response"][:200].replace("\n", " ")
+            lines.append(f"Agent: {snippet}")
+    return "\n".join(lines)
 
 
 def session_paths() -> tuple[Path, Path]:

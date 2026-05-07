@@ -35,7 +35,8 @@ async def run(model_name: str, app_name: str = APP_NAME) -> None:
     runner = Runner(agent=root_agent, app_name=app_name, session_service=session_service)
 
     ensure_model_loaded()
-    logger.init_session()
+    from agent import UNSLOTH_BASE_URL
+    logger.init_session(model=model_name, base_url=UNSLOTH_BASE_URL)
     _, transcript = logger.session_paths()
 
     ui.console.clear()
