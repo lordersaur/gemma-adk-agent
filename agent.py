@@ -59,6 +59,7 @@ _model = LiteLlm(
     model=f"openai/{GEMMA_MODEL}",
     api_base=UNSLOTH_BASE_URL,
     api_key=API_KEY or "unsloth",
+    temperature=0.2,
 )
 
 root_agent = LlmAgent(
