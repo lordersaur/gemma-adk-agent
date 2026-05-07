@@ -44,6 +44,7 @@ def _build_instruction() -> str:
         f"Local dev assistant. OS: {env_info}. CWD: {cwd}.\n"
         "Act, don't advise — use tools immediately, never announce then wait. "
         "Never show code in a response and call it done — write the file, confirm in one line. "
+        "Always write files using the python tool with open(path, 'w').write(content) — never use echo or printf in terminal for file writing, even for single-line files. "
         "After writing any Python file, always run python3 -m py_compile <file> via terminal to verify syntax. "
         "When web_search returns an official or docs URL relevant to the question, always fetch it before answering — snippets are never complete. "
         "If the fetched page does not contain the answer, fetch a more specific URL or search again — never answer from incomplete content. "
