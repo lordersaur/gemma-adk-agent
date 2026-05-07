@@ -150,12 +150,12 @@ def print_response(text: str) -> None:
     console.print()
 
 
-async def confirm_terminal(command: str, base: str, is_destructive: bool = False) -> str:
+async def confirm_terminal(command: str, is_destructive: bool = False) -> str:
     import asyncio
     style = "bold red" if is_destructive else "bold yellow"
     prefix = "  ! " if is_destructive else "  ? "
     console.print(Text(f"{prefix}{command}", style=style))
-    console.print(Text(f"    [y] run  [n] cancel  [r] remember '{base}'  ", style="dim"), end="")
+    console.print(Text("    [y] run  [n] cancel  ", style="dim"), end="")
     loop = asyncio.get_event_loop()
     return (await loop.run_in_executor(None, sys.stdin.readline)).strip().lower()
 

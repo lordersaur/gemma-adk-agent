@@ -146,20 +146,29 @@ _DESTRUCTIVE_PATTERNS = [
     r"find\b.*-exec\s+rm",     # find -exec rm
 ]
 
+_INSTALL_PATTERNS = [
+    r"\bapt(-get)?\s+install\b",
+    r"\bpip\d*\s+install\b",
+    r"\bpip\s+install\b",
+    r"pip\s+install\b",        # python3 -m pip install
+    r"\bnpm\s+(install|i)\b",
+    r"\byarn\s+add\b",
+    r"\bbrew\s+install\b",
+    r"\bcargo\s+(install|add)\b",
+    r"\bgem\s+install\b",
+    r"\bpipx\s+install\b",
+]
+
 def _is_destructive(command: str) -> bool:
     low = command.lower()
     return any(re.search(p, low) for p in _DESTRUCTIVE_PATTERNS)
 
+def _is_install(command: str) -> bool:
+    low = command.lower()
+    return any(re.search(p, low) for p in _INSTALL_PATTERNS)
 
-_auto_approved: set[str] = set()
-
-
-def _base_cmd(command: str) -> str:
-    parts = command.strip().split()
-    for part in parts:
-        if "=" not in part:
-            return part
-    return parts[0] if parts else command
+def _needs_confirmation(command: str) -> bool:
+    return _is_destructive(command) or _is_install(command)
 
 
 async def terminal(command: str) -> str:
@@ -190,13 +199,10 @@ async def terminal(command: str) -> str:
     from rich.text import Text
     from ui import console, render_terminal_live
 
-    base = _base_cmd(command)
-    if base not in _auto_approved:
+    if _needs_confirmation(command):
         from ui import confirm_terminal
-        answer = await confirm_terminal(command, base, is_destructive=_is_destructive(command))
-        if answer in ("r", "remember"):
-            _auto_approved.add(base)
-        elif not answer.startswith("y"):
+        answer = await confirm_terminal(command, is_destructive=_is_destructive(command))
+        if not answer.startswith("y"):
             return "Command cancelled by user."
 
     if _terminal_cwd:
