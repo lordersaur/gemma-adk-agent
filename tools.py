@@ -104,15 +104,16 @@ def python(code: str) -> str:
     """Execute Python code and return stdout + stderr.
 
     IMPORTANT: this tool runs in its own temp directory, not the terminal CWD.
-    Always use absolute paths when writing files: open('/abs/path/file.py', 'w').
+    Always use absolute paths derived from the CWD in the system prompt, e.g.
+    open('/home/user/project/file.py', 'w') — never invent paths like /abs/ or /path/.
+    If you need to write into a subdirectory, create it first with os.makedirs(dir, exist_ok=True).
     File content must be a plain triple-quoted string — no f-strings with curly
     braces (JSX/JSON break encoding), no docstrings inside the content string.
     No emojis in file content, print statements, comments, or strings.
-    If the call errors, retry with corrected code — never claim success on failure.
+    If the call errors, fix the path or code and retry with this tool — never fall back
+    to echo, printf, or heredoc in terminal. Never claim success on failure.
     Never use this tool to run code instead of writing a file, and never use it
     to preview or draft code — write directly to the file on the first call.
-    Always write to an absolute path first (open('/abs/path/file.py', 'w').write(content)),
-    then run via terminal. The only exception is quick one-off calculations with no output file.
     After writing a file, use the terminal tool to run python3 -m py_compile <file>
     to check syntax, then run it with python3 <file>. Never use subprocess inside this
     tool to run other scripts — always use the terminal tool for that.
