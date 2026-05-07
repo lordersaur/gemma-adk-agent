@@ -13,7 +13,7 @@ _HEADERS = {
 }
 
 
-def _fetch_page(url: str, max_chars: int = 4000) -> str:
+def _fetch_page(url: str, max_chars: int = 8000) -> str:
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=10)
         resp.raise_for_status()
