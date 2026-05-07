@@ -31,16 +31,18 @@ def _fetch_page(url: str, max_chars: int = 4000) -> str:
 def web_search(query: str, max_results: int = 3) -> str:
     """Search the web by query, or fetch a specific URL directly.
 
-    Pass a full URL (https://...) to read that page. Pass a search query to
-    get previews of the top results — call again with a result URL to read
-    the full article.
+    TWO MODES:
+    - Query mode: returns titles, URLs, and short snippets. Use this to find
+      relevant pages, then ALWAYS follow up by fetching the most relevant URL(s)
+      before answering. Never answer from snippets alone.
+    - URL mode: pass a full URL (https://...) to fetch and read the full page.
 
     Args:
         query: Search query string, or a full URL to fetch directly.
         max_results: Number of results for search mode (default 3).
 
     Returns:
-        Page content for direct fetches, or titles + previews for searches.
+        Page content for URL fetches, or titles + snippets for searches.
     """
     query = query.strip()
     if query.startswith(("http://", "https://")):
