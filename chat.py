@@ -37,7 +37,7 @@ async def run(model_name: str, app_name: str = APP_NAME) -> None:
 
     prompt_session: PromptSession = PromptSession()
 
-    with patch_stdout():
+    with patch_stdout(raw=True):
         await _input_loop(runner, prompt_session)
 
 

@@ -112,9 +112,9 @@ async def terminal(command: str) -> str:
     from ui import console, render_terminal_live
 
     if _terminal_cwd:
-        full_command = f"cd {_terminal_cwd!r} && ( {command} ); echo '{_CWD_SENTINEL}'\"$(pwd)\""
+        full_command = f"cd {_terminal_cwd!r} && {command}; echo '{_CWD_SENTINEL}'\"$(pwd)\""
     else:
-        full_command = f"( {command} ); echo '{_CWD_SENTINEL}'\"$(pwd)\""
+        full_command = f"{command}; echo '{_CWD_SENTINEL}'\"$(pwd)\""
 
     proc = await asyncio.create_subprocess_shell(
         full_command,
