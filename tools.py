@@ -76,7 +76,9 @@ def python(code: str) -> str:
     Never use this tool to run code instead of writing a file — always write to an
     absolute path first (open('/abs/path/file.py', 'w').write(content)), then run
     via terminal. The only exception is quick one-off calculations with no output file.
-    After writing a file, always run it via terminal to verify it executes without errors.
+    After writing a file, use the terminal tool to run python3 -m py_compile <file>
+    to check syntax, then run it with python3 <file>. Never use subprocess inside this
+    tool to run other scripts — always use the terminal tool for that.
     Use this tool to write all multi-line files — never use echo in terminal for file writing.
 
     Args:
@@ -93,14 +95,14 @@ def python(code: str) -> str:
             [sys.executable, tmp],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
         output = result.stdout
         if result.stderr:
             output += ("\n" if output else "") + result.stderr
         return output.strip() or "(no output)"
     except subprocess.TimeoutExpired:
-        return "Error: execution timed out after 30 seconds."
+        return "Error: execution timed out after 60 seconds."
     except Exception as e:
         return f"Error: {e}"
     finally:
@@ -120,11 +122,24 @@ _DESTRUCTIVE_PATTERNS = [
     r"\brm\b.*/\S",            # rm with absolute path
     r"git\s+reset\s+--hard",
     r"git\s+clean\s+-[a-z]*f",
+    r"find\b.*-delete",        # find -delete
+    r"find\b.*-exec\s+rm",     # find -exec rm
 ]
 
 def _is_destructive(command: str) -> bool:
     low = command.lower()
     return any(re.search(p, low) for p in _DESTRUCTIVE_PATTERNS)
+
+
+_auto_approved: set[str] = set()
+
+
+def _base_cmd(command: str) -> str:
+    parts = command.strip().split()
+    for part in parts:
+        if "=" not in part:
+            return part
+    return parts[0] if parts else command
 
 
 async def terminal(command: str) -> str:
@@ -134,8 +149,9 @@ async def terminal(command: str) -> str:
     Before entering a directory the user mentions by name, run ls -F first to
     confirm it exists — never assume or create it.
     Never run ls -R (node_modules overflow) — use ls -F or find -maxdepth 2.
-    Never start dev servers (they block forever) — give the user the command
-    and URL instead (Vite: http://localhost:5173, CRA: http://localhost:3000).
+    Never start or run a server, daemon, or any long-running process — write
+    the file, then tell the user the exact command to run and the URL. Never
+    run flask run, uvicorn, node server.js, npm start, or similar.
     Install packages with: python3 -m pip install X (pip is not on PATH).
     Syntax check: python3 -m py_compile <file> — never claim correct without running.
     Pass --yes/-y/--force to skip interactive prompts.
@@ -151,12 +167,13 @@ async def terminal(command: str) -> str:
     from rich.text import Text
     from ui import console, render_terminal_live
 
-    if _is_destructive(command):
-        console.print(Text(f"  ! destructive command: {command}", style="bold yellow"))
-        console.print(Text("    allow? [y/N] ", style="bold yellow"), end="")
-        loop = asyncio.get_event_loop()
-        answer = await loop.run_in_executor(None, sys.stdin.readline)
-        if answer.strip().lower() != "y":
+    base = _base_cmd(command)
+    if base not in _auto_approved:
+        from ui import confirm_terminal
+        answer = await confirm_terminal(command, base, is_destructive=_is_destructive(command))
+        if answer in ("r", "remember"):
+            _auto_approved.add(base)
+        elif not answer.startswith("y"):
             return "Command cancelled by user."
 
     if _terminal_cwd:
@@ -192,7 +209,7 @@ async def terminal(command: str) -> str:
 
         read_task = asyncio.ensure_future(_read_stream())
         try:
-            await asyncio.wait_for(asyncio.shield(read_task), timeout=180)
+            await asyncio.wait_for(asyncio.shield(read_task), timeout=60)
         except asyncio.TimeoutError:
             timed_out = True
             read_task.cancel()
@@ -228,5 +245,5 @@ async def terminal(command: str) -> str:
     if interrupted:
         return (result + "\n(interrupted by user)").strip()
     if timed_out:
-        return (result + "\nError: command timed out after 3 minutes.").strip()
+        return (result + "\nError: command timed out after 1 minute.").strip()
     return result or "(no output)"
