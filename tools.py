@@ -32,10 +32,10 @@ def web_search(query: str, max_results: int = 3) -> str:
     """Search the web by query, or fetch a specific URL directly.
 
     TWO MODES:
-    - Query mode: returns titles, URLs, and short snippets. If the snippets
-      contain enough to answer (e.g. a version number, a short fact), answer
-      directly. If you need full content (article body, docs, code examples),
-      follow up by fetching the relevant URL before answering.
+    - Query mode: returns titles, URLs, and short snippets. Snippets are
+      summaries only — for complete answers (full argument lists, API docs,
+      code examples, article body) you MUST fetch the relevant URL before
+      answering. Never give an incomplete answer when a URL is available.
     - URL mode: pass a full URL (https://...) to fetch and read the full page.
 
     Args:
@@ -149,6 +149,8 @@ async def terminal(command: str) -> str:
     Before entering a directory the user mentions by name, run ls -F first to
     confirm it exists — never assume or create it.
     Never run ls -R (node_modules overflow) — use ls -F or find -maxdepth 2.
+    Never use echo, printf, or heredoc to write file contents — use the python
+    tool with open('/abs/path', 'w').write(content) for all file creation.
     Never start or run a server, daemon, or any long-running process — write
     the file, then tell the user the exact command to run and the URL. Never
     run flask run, uvicorn, node server.js, npm start, or similar.
