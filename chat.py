@@ -1,16 +1,10 @@
 import asyncio
-import sys
 import time
 import uuid
-
-from rich.live import Live
-from rich.text import Text
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai.types import Content, Part
-from prompt_toolkit import PromptSession
-from prompt_toolkit.patch_stdout import patch_stdout
 
 from agent import ensure_model_loaded
 import logger
@@ -41,14 +35,18 @@ async def run(model_name: str, app_name: str = APP_NAME) -> None:
     logger.init_session(model=model_name, base_url=UNSLOTH_BASE_URL)
     _, transcript = logger.session_paths()
 
-    ui.console.clear()
     ui.print_header(model_name)
-    ui.console.print(f"[dim]  logs -> {transcript.name}[/dim]\n")
+    ui.write_markup(f"[dim]  logs -> {transcript.name}[/dim]\n")
 
-    prompt_session: PromptSession = PromptSession(completer=ui.SlashCompleter())
-
-    with patch_stdout(raw=True):
-        await _input_loop(runner, session_service, session_id, app_name, model_name, prompt_session)
+    loop_task = asyncio.ensure_future(
+        _input_loop(runner, session_service, session_id, app_name, model_name)
+    )
+    await ui.run_app()
+    loop_task.cancel()
+    try:
+        await loop_task
+    except asyncio.CancelledError:
+        pass
 
 
 async def _input_loop(
@@ -57,22 +55,12 @@ async def _input_loop(
     session_id: str,
     app_name: str,
     model_name: str,
-    prompt_session: PromptSession,
 ) -> None:
     last_prompt_tokens = 0
 
     while True:
-        try:
-            user_input = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: prompt_session.prompt(
-                    [("class:prompt", " > ")],
-                    style=ui.PROMPT_STYLE,
-                ).strip(),
-            )
-        except (EOFError, KeyboardInterrupt):
-            ui.console.print("\n[dim]bye[/dim]")
-            break
+        ui._interrupt_event.clear()
+        user_input = await ui.get_input()
 
         if not user_input:
             continue
@@ -80,20 +68,21 @@ async def _input_loop(
         cmd = user_input.lower()
 
         if cmd in ("/exit", "/quit"):
-            ui.console.print("[dim]bye[/dim]")
-            break
+            ui.write_markup("[dim]bye[/dim]")
+            ui.exit_app()
+            return
         elif cmd == "/help":
             ui.print_help()
             continue
         elif cmd == "/clear":
-            ui.console.clear()
+            ui.clear_screen()
             ui.print_header(model_name)
             continue
         elif cmd == "/new":
             session_id = await _new_session(session_service, app_name)
             logger.log_context_reset(session_id)
             last_prompt_tokens = 0
-            ui.console.clear()
+            ui.clear_screen()
             ui.print_header(model_name)
             ui.print_success("new session — context cleared")
             continue
@@ -107,30 +96,37 @@ async def _input_loop(
             continue
         elif cmd == "/permissions":
             from tools import _auto_approved_categories, _save_permissions
+            ui.print_permissions(_auto_approved_categories)
             if _auto_approved_categories:
-                ui.print_permissions(_auto_approved_categories)
-                ui.console.print(Text("  clear all? [y/N] ", style="dim"), end="")
-                answer = (await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)).strip().lower()
-                if answer == "y":
+                ui.write_markup("[dim]  clear all? [y/N][/dim]")
+                answer = await ui.get_input()
+                if answer.strip().lower() == "y":
                     _auto_approved_categories.clear()
                     _save_permissions(_auto_approved_categories)
                     ui.print_success("permissions cleared")
-            else:
-                ui.print_permissions(_auto_approved_categories)
             continue
 
         logger.log_user(user_input)
-        task = asyncio.ensure_future(_send(runner, session_id, user_input))
+        ui.print_user(user_input)
+
+        send_task = asyncio.ensure_future(_send(runner, session_id, user_input))
+
+        async def _watch_interrupt():
+            await ui._interrupt_event.wait()
+            send_task.cancel()
+
+        watcher = asyncio.ensure_future(_watch_interrupt())
+        prompt_tokens = 0
         try:
-            prompt_tokens = await task
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            task.cancel()
+            prompt_tokens = await send_task
+        except asyncio.CancelledError:
+            ui.write_markup("[dim]interrupted[/dim]\n")
+        finally:
+            watcher.cancel()
             try:
-                await task
+                await watcher
             except asyncio.CancelledError:
                 pass
-            ui.console.print("\n[dim]interrupted[/dim]\n")
-            continue
 
         if prompt_tokens:
             last_prompt_tokens = prompt_tokens
@@ -179,41 +175,26 @@ async def _send(runner: Runner, session_id: str, user_input: str) -> int:
 
     _thinking_shown = False
     _response_streamed = False
-    _response_live: Live | None = None
 
-    _timer_live: list[Live | None] = [None]
     _timer_task: list[asyncio.Task | None] = [None]
+
+    ui.start_thinking_status()
 
     async def _run_timer() -> None:
         await asyncio.sleep(2.0)
-        live = ui.make_thinking_live()
-        live.start()
-        _timer_live[0] = live
         try:
             while True:
                 elapsed = round(time.monotonic() - (thinking_start or t_start))
-                live.update(ui.render_thinking_status(elapsed))
+                ui.update_thinking_status(elapsed)
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             pass
-        finally:
-            if _timer_live[0] is not None:
-                _timer_live[0].stop()
-                _timer_live[0] = None
 
     def _cancel_timer() -> None:
-        if _timer_live[0] is not None:
-            _timer_live[0].stop()
-            _timer_live[0] = None
         if _timer_task[0] is not None and not _timer_task[0].done():
             _timer_task[0].cancel()
             _timer_task[0] = None
-
-    def _stop_response_live() -> None:
-        nonlocal _response_live
-        if _response_live is not None:
-            _response_live.stop()
-            _response_live = None
+        ui.stop_thinking_status()
 
     def _flush_thinking() -> None:
         nonlocal _thinking_shown
@@ -234,7 +215,7 @@ async def _send(runner: Runner, session_id: str, user_input: str) -> int:
         ):
             for fc in event.get_function_calls():
                 _cancel_timer()
-                _stop_response_live()
+                ui.end_stream()
                 _flush_thinking()
                 args = dict(fc.args) if fc.args else {}
                 logger.log_tool_call(fc.name, args)
@@ -245,6 +226,7 @@ async def _send(runner: Runner, session_id: str, user_input: str) -> int:
                 logger.log_tool_result(fr.name, result)
                 ui.print_tool_result(fr.name, result)
                 if _timer_task[0] is None:
+                    ui.start_thinking_status()
                     _timer_task[0] = asyncio.ensure_future(_run_timer())
 
             if event.usage_metadata:
@@ -268,12 +250,11 @@ async def _send(runner: Runner, session_id: str, user_input: str) -> int:
                 if resp_text and event.partial:
                     _cancel_timer()
                     _flush_thinking()
-                    if _response_live is None:
-                        _response_live = ui.make_response_live()
-                        _response_live.start()
+                    if not _response_streamed:
+                        ui.start_stream()
                         _response_streamed = True
                     response_buf += resp_text
-                    _response_live.update(ui.render_response(response_buf))
+                    ui.update_stream(response_buf)
 
             if event.is_final_response():
                 _cancel_timer()
@@ -297,11 +278,11 @@ async def _send(runner: Runner, session_id: str, user_input: str) -> int:
                     if r:
                         response_buf = r
 
-                _stop_response_live()
+                ui.end_stream()
 
     except Exception as e:
         _cancel_timer()
-        _stop_response_live()
+        ui.end_stream()
         err = str(e)
         logger.log_error(err)
         if "502" in err or "Lost connection" in err or "crashed" in err:
@@ -349,7 +330,9 @@ async def _send(runner: Runner, session_id: str, user_input: str) -> int:
         logger.log_response(response_buf)
         if not _response_streamed:
             ui.print_response(response_buf)
+        else:
+            ui.write_markup("")
     else:
-        ui.console.print()
+        ui.write_markup("")
 
     return prompt_tokens

@@ -267,14 +267,11 @@ async def terminal(command: str) -> str:
         Combined stdout and stderr from the command.
     """
     global _terminal_cwd
-    from rich.live import Live
-    from rich.text import Text
-    from ui import console, render_terminal_live
+    import ui
 
     category = _command_category(command)
     if category and (category == "destructive" or category not in _auto_approved_categories):
-        from ui import confirm_terminal
-        answer = await confirm_terminal(command, category=category)
+        answer = await ui.confirm_terminal(command, category=category)
         if answer in ("r", "remember") and category != "destructive":
             _auto_approved_categories.add(category)
             _save_permissions(_auto_approved_categories)
@@ -300,37 +297,38 @@ async def terminal(command: str) -> str:
     interrupted = False
     timed_out = False
 
-    with Live(render_terminal_live([], done=False), console=console, refresh_per_second=10) as live:
+    ui.start_terminal_progress()
 
-        async def _read_stream() -> None:
-            async for line in proc.stdout:
-                text = line.decode(errors="replace")
-                output_parts.append(text)
-                live.update(render_terminal_live(output_parts, done=False))
-                low = text.strip().lower()
-                if any(p in low for p in _CONFIRM_PATTERNS):
-                    proc.stdin.write(b"y\n")
-                    await proc.stdin.drain()
+    async def _read_stream() -> None:
+        async for line in proc.stdout:
+            text = line.decode(errors="replace")
+            output_parts.append(text)
+            ui.update_terminal_progress(output_parts, done=False)
+            low = text.strip().lower()
+            if any(p in low for p in _CONFIRM_PATTERNS):
+                proc.stdin.write(b"y\n")
+                await proc.stdin.drain()
 
-        read_task = asyncio.ensure_future(_read_stream())
+    read_task = asyncio.ensure_future(_read_stream())
+    try:
+        await asyncio.wait_for(asyncio.shield(read_task), timeout=60)
+    except asyncio.TimeoutError:
+        timed_out = True
+        read_task.cancel()
+        proc.kill()
+        await proc.wait()
+    except asyncio.CancelledError:
+        interrupted = True
+        read_task.cancel()
+        proc.send_signal(__import__("signal").SIGINT)
         try:
-            await asyncio.wait_for(asyncio.shield(read_task), timeout=60)
+            await asyncio.wait_for(proc.wait(), timeout=3)
         except asyncio.TimeoutError:
-            timed_out = True
-            read_task.cancel()
             proc.kill()
             await proc.wait()
-        except asyncio.CancelledError:
-            interrupted = True
-            read_task.cancel()
-            proc.send_signal(__import__("signal").SIGINT)
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=3)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
 
-        live.update(render_terminal_live(output_parts, done=True))
+    ui.update_terminal_progress(output_parts, done=True)
+    ui.end_terminal_progress()
 
     await proc.wait()
     raw = "".join(output_parts)
