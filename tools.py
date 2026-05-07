@@ -148,9 +148,7 @@ _DESTRUCTIVE_PATTERNS = [
 
 _INSTALL_PATTERNS = [
     r"\bapt(-get)?\s+install\b",
-    r"\bpip\d*\s+install\b",
-    r"\bpip\s+install\b",
-    r"pip\s+install\b",        # python3 -m pip install
+    r"pip\s+install\b",
     r"\bnpm\s+(install|i)\b",
     r"\byarn\s+add\b",
     r"\bbrew\s+install\b",
@@ -159,16 +157,25 @@ _INSTALL_PATTERNS = [
     r"\bpipx\s+install\b",
 ]
 
-def _is_destructive(command: str) -> bool:
-    low = command.lower()
-    return any(re.search(p, low) for p in _DESTRUCTIVE_PATTERNS)
+_EXECUTE_PATTERNS = [
+    r"\bpython3?\s+(?!-m\b)(?!--)\S+\.py\b",   # python3 script.py
+    r"\bnode\s+\S+\.js\b",                       # node app.js
+    r"\b(bash|sh)\s+\S+\.sh\b",                  # bash script.sh
+]
 
-def _is_install(command: str) -> bool:
-    low = command.lower()
-    return any(re.search(p, low) for p in _INSTALL_PATTERNS)
+_auto_approved_categories: set[str] = set()
 
-def _needs_confirmation(command: str) -> bool:
-    return _is_destructive(command) or _is_install(command)
+
+def _command_category(command: str) -> str | None:
+    """Returns the category requiring confirmation, or None if safe to auto-run."""
+    low = command.lower()
+    if any(re.search(p, low) for p in _DESTRUCTIVE_PATTERNS):
+        return "destructive"
+    if any(re.search(p, low) for p in _INSTALL_PATTERNS):
+        return "install"
+    if any(re.search(p, low) for p in _EXECUTE_PATTERNS):
+        return "execute"
+    return None
 
 
 async def terminal(command: str) -> str:
@@ -199,10 +206,13 @@ async def terminal(command: str) -> str:
     from rich.text import Text
     from ui import console, render_terminal_live
 
-    if _needs_confirmation(command):
+    category = _command_category(command)
+    if category and (category == "destructive" or category not in _auto_approved_categories):
         from ui import confirm_terminal
-        answer = await confirm_terminal(command, is_destructive=_is_destructive(command))
-        if not answer.startswith("y"):
+        answer = await confirm_terminal(command, category=category)
+        if answer in ("r", "remember") and category != "destructive":
+            _auto_approved_categories.add(category)
+        elif not answer.startswith("y"):
             return "Command cancelled by user."
 
     if _terminal_cwd:
