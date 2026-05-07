@@ -83,6 +83,20 @@ def _unwrap_tool_result(response: dict) -> str:
     return str(val)
 
 
+_PARSE_ERROR_MARKERS = (
+    "Unterminated string",
+    "JSONDecodeError",
+    "json.decoder",
+    "Expecting value",
+    "Invalid control character",
+    "Invalid \\escape",
+)
+
+
+def _is_tool_call_parse_error(err: str) -> bool:
+    return any(m.lower() in err.lower() for m in _PARSE_ERROR_MARKERS)
+
+
 async def _send(runner: Runner, user_input: str) -> None:
     message = Content(role="user", parts=[Part(text=user_input)])
     thinking_buf = ""
@@ -202,6 +216,20 @@ async def _send(runner: Runner, user_input: str) -> None:
                 ui.print_success("model reloaded, please resend your message")
             except Exception as reload_err:
                 ui.print_error(f"reload failed: {reload_err}")
+        elif _is_tool_call_parse_error(err):
+            ui.print_warning(f"tool call JSON parse error: {err}")
+            recovery = (
+                f"Your last tool call could not be executed because the arguments contained "
+                f"characters that broke JSON encoding (error: {err}). "
+                "This usually happens when Python code contains raw newlines, unescaped quotes, "
+                "or curly braces inside an f-string. "
+                "Fix: assign the file content to a variable using plain triple-quoted string "
+                "(content = '''...'''), then call open(path, 'w').write(content). "
+                "Do NOT use f-strings for file content. Retry the operation now."
+            )
+            logger.log_error(f"[auto-recovery] injecting: {recovery}")
+            await _send(runner, recovery)
+            return
         else:
             ui.print_error(err)
         return
