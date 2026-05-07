@@ -73,6 +73,9 @@ def python(code: str) -> str:
     braces (JSX/JSON break encoding), no docstrings inside the content string.
     No emojis in file content, print statements, comments, or strings.
     If the call errors, retry with corrected code — never claim success on failure.
+    Never use this tool to run code instead of writing a file — always write to an
+    absolute path first (open('/abs/path/file.py', 'w').write(content)), then run
+    via terminal. The only exception is quick one-off calculations with no output file.
     After writing a file, always run it via terminal to verify it executes without errors.
     Use this tool to write all multi-line files — never use echo in terminal for file writing.
 
