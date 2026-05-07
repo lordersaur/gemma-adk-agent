@@ -1,14 +1,16 @@
 import json
 import os
 
+from rich import box as richbox
 from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
-from rich.status import Status
+from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.styles import Style
 
 _THEME = Theme({
@@ -21,11 +23,43 @@ _THEME = Theme({
     "border":      "bright_black",
     "header":      "bold magenta",
     "model":       "dim magenta",
+    "cmd":         "bold cyan",
+    "cmd.desc":    "dim white",
 })
 
 console = Console(theme=_THEME, highlight=False)
 
-PROMPT_STYLE = Style.from_dict({"prompt": "ansibrightcyan bold"})
+PROMPT_STYLE = Style.from_dict({
+    "prompt":  "ansibrightcyan bold bg:ansimagenta",
+    "completion-menu.completion":              "bg:#2a1a3e white",
+    "completion-menu.completion.current":      "bg:ansimagenta white bold",
+    "completion-menu.meta.completion":         "bg:#2a1a3e #888888",
+    "completion-menu.meta.completion.current": "bg:ansimagenta #cccccc",
+})
+
+_SLASH_COMMANDS = [
+    ("/help",    "show help"),
+    ("/clear",   "clear the screen"),
+    ("/new",     "start a fresh session"),
+    ("/history", "show log file paths"),
+    ("/model",   "show active model and backend"),
+    ("/exit",    "quit"),
+]
+
+
+class SlashCompleter(Completer):
+    def get_completions(self, document, complete_event):
+        text = document.text_before_cursor
+        if not text.startswith("/"):
+            return
+        for cmd, desc in _SLASH_COMMANDS:
+            if cmd.startswith(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display=cmd,
+                    display_meta=desc,
+                )
 
 
 def print_header(model_name: str) -> None:
@@ -36,13 +70,16 @@ def print_header(model_name: str) -> None:
 
 
 def print_user(text: str) -> None:
-    console.print(Text("  You", style="user"), end="  ")
-    console.print(text)
+    console.print(Panel(Text(text), box=richbox.MINIMAL, style="white on #0a1628", padding=(0, 0)))
     console.print()
 
 
-def make_thinking_status() -> Status:
-    return Status("  thinking...", spinner="dots", console=console, spinner_style="dim")
+def make_thinking_live() -> Live:
+    return Live("", console=console, refresh_per_second=8, transient=True)
+
+
+def render_thinking_status(elapsed: int) -> Text:
+    return Text(f"  thinking... {elapsed}s", style="dim italic")
 
 
 def print_thinking(text: str) -> None:
@@ -59,6 +96,11 @@ def print_thinking(text: str) -> None:
     console.print()
 
 
+def print_thinking_summary(elapsed_seconds: int) -> None:
+    console.print(Text(f"  thought for {elapsed_seconds}s", style="dim italic"))
+    console.print()
+
+
 def make_response_live() -> Live:
     return Live(
         "",
@@ -69,7 +111,7 @@ def make_response_live() -> Live:
 
 
 def render_response(text: str) -> Markdown:
-    return Markdown(text)
+    return Markdown("● " + text)
 
 
 def render_terminal_live(lines: list[str], done: bool = False) -> object:
@@ -103,7 +145,7 @@ def print_tool_result(name: str, result: str) -> None:
 def print_response(text: str) -> None:
     if not text:
         return
-    console.print(Markdown(text), style="agent")
+    console.print(render_response(text))
     console.print()
 
 
@@ -113,8 +155,52 @@ def print_error(message: str) -> None:
 
 
 def print_warning(message: str) -> None:
-    console.print(Text(f"  !  {message}", style="bold red"))
+    console.print(Text(f"  !  {message}", style="bold yellow"))
 
 
 def print_success(message: str) -> None:
     console.print(Text(f"  ok  {message}", style="bold green"))
+
+
+def print_help() -> None:
+    table = Table(box=None, padding=(0, 2), show_header=False)
+    table.add_column(style="cmd", no_wrap=True)
+    table.add_column(style="cmd.desc")
+    commands = [
+        ("/help",    "show this help"),
+        ("/clear",   "clear the screen"),
+        ("/new",     "start a fresh session (resets model context)"),
+        ("/history", "show current log file paths"),
+        ("/model",   "show active model and backend"),
+        ("/exit",    "quit"),
+    ]
+    for cmd, desc in commands:
+        table.add_row(cmd, desc)
+    panel = Panel(
+        table,
+        title="[header]Commands[/header]",
+        border_style="bright_black",
+        padding=(0, 1),
+    )
+    console.print(panel)
+    console.print()
+
+
+def print_history(jsonl_path, transcript_path) -> None:
+    console.print(Text(f"  jsonl      {jsonl_path}", style="dim"))
+    console.print(Text(f"  transcript {transcript_path}", style="dim"))
+    console.print()
+
+
+def print_model_info(model: str, base_url: str) -> None:
+    console.print(Text(f"  model    {model}", style="dim"))
+    console.print(Text(f"  backend  {base_url}", style="dim"))
+    console.print()
+
+
+def print_session_reset(old_tokens: int, new_session_id: str) -> None:
+    console.print(Rule(
+        f"[dim]  context reset  ({old_tokens:,} tokens)  ->  {new_session_id}  [/dim]",
+        style="yellow"
+    ))
+    console.print()
