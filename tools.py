@@ -175,6 +175,7 @@ async def terminal(command: str) -> str:
     the file, then tell the user the exact command to run and the URL. Never
     run flask run, uvicorn, node server.js, npm start, or similar.
     Install packages with: python3 -m pip install X (pip is not on PATH).
+    If pip fails with externally-managed-environment, retry with --break-system-packages.
     Syntax check: python3 -m py_compile <file> — never claim correct without running.
     Pass --yes/-y/--force to skip interactive prompts.
 
