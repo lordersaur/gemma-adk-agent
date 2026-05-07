@@ -32,9 +32,10 @@ def web_search(query: str, max_results: int = 3) -> str:
     """Search the web by query, or fetch a specific URL directly.
 
     TWO MODES:
-    - Query mode: returns titles, URLs, and short snippets. Use this to find
-      relevant pages, then ALWAYS follow up by fetching the most relevant URL(s)
-      before answering. Never answer from snippets alone.
+    - Query mode: returns titles, URLs, and short snippets. If the snippets
+      contain enough to answer (e.g. a version number, a short fact), answer
+      directly. If you need full content (article body, docs, code examples),
+      follow up by fetching the relevant URL before answering.
     - URL mode: pass a full URL (https://...) to fetch and read the full page.
 
     Args:
@@ -70,8 +71,10 @@ def python(code: str) -> str:
     Always use absolute paths when writing files: open('/abs/path/file.py', 'w').
     File content must be a plain triple-quoted string — no f-strings with curly
     braces (JSX/JSON break encoding), no docstrings inside the content string.
+    No emojis in file content, print statements, comments, or strings.
     If the call errors, retry with corrected code — never claim success on failure.
-    Write files here, then run them via the terminal tool.
+    After writing a file, always run it via terminal to verify it executes without errors.
+    Use this tool to write all multi-line files — never use echo in terminal for file writing.
 
     Args:
         code: Valid Python source code to execute.
