@@ -10,3 +10,4 @@ prompt_toolkit
 fastapi
 uvicorn[standard]
 python-multipart
+httpx
