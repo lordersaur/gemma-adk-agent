@@ -1,6 +1,6 @@
 import json
 import os
-import time
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,10 +8,38 @@ _LOG_DIR = Path(__file__).parent / "logs"
 _session_id: str = ""
 _jsonl_path: Path | None = None
 _transcript_path: Path | None = None
+_log_server_url: str | None = None
+
+
+def _post(path: str, data: dict) -> None:
+    try:
+        import requests
+        requests.post(f"{_log_server_url}{path}", json=data, timeout=2)
+    except Exception:
+        pass
+
+
+def _forward_event(record: dict) -> None:
+    if _log_server_url:
+        threading.Thread(
+            target=_post,
+            args=("/log/event", {"session_id": _session_id, "record": record}),
+            daemon=True,
+        ).start()
+
+
+def _forward_transcript(text: str) -> None:
+    if _log_server_url:
+        threading.Thread(
+            target=_post,
+            args=("/log/transcript", {"session_id": _session_id, "text": text}),
+            daemon=True,
+        ).start()
 
 
 def init_session(model: str = "", base_url: str = "") -> str:
-    global _session_id, _jsonl_path, _transcript_path
+    global _session_id, _jsonl_path, _transcript_path, _log_server_url
+    _log_server_url = os.getenv("LOG_SERVER_URL", "").rstrip("/")
     _session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     _LOG_DIR.mkdir(exist_ok=True)
     _jsonl_path = _LOG_DIR / f"{_session_id}_debug.jsonl"
@@ -33,6 +61,7 @@ def _event(type_: str, data: dict) -> None:
     record = {"ts": _ts(), "type": type_, **data}
     with _jsonl_path.open("a") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    _forward_event(record)
 
 
 def _write_transcript(text: str) -> None:
@@ -40,6 +69,7 @@ def _write_transcript(text: str) -> None:
         return
     with _transcript_path.open("a") as f:
         f.write(text)
+    _forward_transcript(text)
 
 
 # ── public logging API ─────────────────────────────────────────────────────────
