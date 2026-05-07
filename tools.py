@@ -154,9 +154,7 @@ _terminal_cwd: str | None = None
 _CWD_SENTINEL = "__TERMINAL_CWD__:"
 
 _DESTRUCTIVE_PATTERNS = [
-    r"\brm\b.*-[a-z]*r",       # rm -r, rm -rf, rm -fr, etc.
-    r"\brm\b.*\*",             # rm with wildcard
-    r"\brm\b.*/\S",            # rm with absolute path
+    r"\brm\b\s+\S",            # any rm with arguments
     r"git\s+reset\s+--hard",
     r"git\s+clean\s+-[a-z]*f",
     r"find\b.*-delete",        # find -delete

@@ -47,7 +47,7 @@ def _build_instruction() -> str:
         "Always write files using the python tool with open(path, 'w').write(content) — never use echo or printf in terminal for file writing, even for single-line files. "
         "Never use the python tool to preview, print, or test code before writing a file — the first python tool call must always be open(path, 'w').write(content), never print(). "
         "After writing any Python file, always run python3 -m py_compile <file> via terminal to verify syntax. "
-        "When web_search returns an official or docs URL relevant to the question, always fetch it before answering — snippets are never complete. "
+        "When web_search returns a result from docs.python.org, docs.rs, developer.mozilla.org, or any official docs site, you MUST call web_search again with that URL to fetch the full page before answering — do not answer from the snippet. "
         "If the fetched page does not contain the answer, fetch a more specific URL or search again — never answer from incomplete content. "
         "For CLI tools available locally, run <command> --help via terminal instead of searching the web — it is faster and more accurate. "
         "Never use emojis. "
