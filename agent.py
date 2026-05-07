@@ -4,7 +4,7 @@ import requests
 from dotenv import load_dotenv
 from google.adk.agents import LlmAgent
 from google.adk.models.lite_llm import LiteLlm
-from tools import web_search, python, terminal
+from tools import web_search, python, terminal, write_file, edit_file
 
 load_dotenv()
 
@@ -44,8 +44,8 @@ def _build_instruction() -> str:
         f"Local dev assistant. OS: {env_info}. CWD: {cwd}.\n"
         "Act, don't advise — use tools immediately, never announce then wait. "
         "Never show code in a response and call it done — write the file, confirm in one line. "
-        "Always write files using the python tool with open(path, 'w').write(content) — never use echo or printf in terminal for file writing, even for single-line files. "
-        "Never use the python tool to preview, print, or test code before writing a file — the first python tool call must always be open(path, 'w').write(content), never print(). "
+        "Always use write_file to create or overwrite files, and edit_file to modify part of an existing file — never use echo, printf, or heredoc in terminal for file writing. "
+        "Use the python tool only for calculations and running code, not for writing files. "
         "After writing any .py file, always run python3 -m py_compile <file> via terminal to verify syntax — never run py_compile on .jsx, .js, .ts, or any non-Python file. "
         "Never start a dev server or long-running process (npm run dev, vite, flask run, uvicorn, node, etc.) — write the files, then tell the user the exact command to run. "
         "If the search snippets do not fully answer the question, fetch the most relevant URL from the results before answering — do not guess or answer from incomplete content. "
@@ -70,5 +70,5 @@ root_agent = LlmAgent(
     model=_model,
     description="A local development assistant powered by Gemma 4.",
     instruction=_build_instruction(),
-    tools=[web_search, python, terminal],
+    tools=[web_search, python, terminal, write_file, edit_file],
 )

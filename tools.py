@@ -103,22 +103,10 @@ def web_search(query: str, max_results: int = 3) -> str:
 def python(code: str) -> str:
     """Execute Python code and return stdout + stderr.
 
-    IMPORTANT: this tool shares the same CWD as the terminal tool — if you cd'd
-    somewhere in terminal, this tool is already in that directory too.
-    Use relative paths for files in the current directory (open('file.py', 'w')),
-    or absolute paths for clarity — never invent paths like /abs/ or /path/.
-    If you need to write into a subdirectory, create it first with os.makedirs(dir, exist_ok=True).
-    File content must be a plain triple-quoted string — no f-strings with curly
-    braces (JSX/JSON break encoding), no docstrings inside the content string.
-    No emojis in file content, print statements, comments, or strings.
-    If the call errors, fix the path or code and retry with this tool — never fall back
-    to echo, printf, or heredoc in terminal. Never claim success on failure.
-    Never use this tool to run code instead of writing a file, and never use it
-    to preview or draft code — write directly to the file on the first call.
-    After writing a file, use the terminal tool to run python3 -m py_compile <file>
-    to check syntax, then run it with python3 <file>. Never use subprocess inside this
-    tool to run other scripts — always use the terminal tool for that.
-    Use this tool to write all multi-line files — never use echo in terminal for file writing.
+    Use this tool for calculations, data processing, and running code — NOT for
+    writing files. Use write_file to create or overwrite files, and edit_file to
+    modify parts of existing files. Never use subprocess inside this tool to run
+    other scripts — always use the terminal tool for that.
 
     Args:
         code: Valid Python source code to execute.
@@ -150,6 +138,65 @@ def python(code: str) -> str:
             os.unlink(tmp)
         except Exception:
             pass
+
+
+def write_file(path: str, content: str) -> str:
+    """Write content to a file, creating it or overwriting it entirely.
+
+    Use this tool to create new files or fully replace an existing file.
+    For modifying only part of an existing file, use edit_file instead.
+    Path is relative to the terminal CWD, or use an absolute path.
+    Parent directories are created automatically.
+    No emojis in content.
+
+    Args:
+        path: File path to write (relative to CWD or absolute).
+        content: Full content to write to the file.
+
+    Returns:
+        Confirmation message or error.
+    """
+    try:
+        full_path = path if os.path.isabs(path) else os.path.join(_terminal_cwd or os.getcwd(), path)
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"wrote {full_path} ({len(content)} chars)"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def edit_file(path: str, old_str: str, new_str: str) -> str:
+    """Replace an exact string in a file with a new string.
+
+    Use this tool to modify part of an existing file without rewriting it.
+    old_str must match exactly — including whitespace and indentation.
+    If old_str appears more than once, only the first occurrence is replaced.
+    To replace all occurrences, call this tool multiple times.
+    If the file does not exist or old_str is not found, an error is returned.
+
+    Args:
+        path: File path to edit (relative to CWD or absolute).
+        old_str: The exact string to find and replace.
+        new_str: The string to replace it with.
+
+    Returns:
+        Confirmation message or error.
+    """
+    try:
+        full_path = path if os.path.isabs(path) else os.path.join(_terminal_cwd or os.getcwd(), path)
+        with open(full_path, "r", encoding="utf-8") as f:
+            original = f.read()
+        if old_str not in original:
+            return f"Error: old_str not found in {full_path}"
+        updated = original.replace(old_str, new_str, 1)
+        with open(full_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+        return f"edited {full_path}"
+    except FileNotFoundError:
+        return f"Error: file not found: {full_path}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 _terminal_cwd: str | None = None
