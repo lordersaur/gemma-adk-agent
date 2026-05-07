@@ -1,8 +1,10 @@
 import asyncio
+import sys
 import time
 import uuid
 
 from rich.live import Live
+from rich.text import Text
 
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -102,6 +104,19 @@ async def _input_loop(
         elif cmd == "/model":
             from agent import UNSLOTH_BASE_URL
             ui.print_model_info(model_name, UNSLOTH_BASE_URL)
+            continue
+        elif cmd == "/permissions":
+            from tools import _auto_approved_categories, _save_permissions
+            if _auto_approved_categories:
+                ui.print_permissions(_auto_approved_categories)
+                ui.console.print(Text("  clear all? [y/N] ", style="dim"), end="")
+                answer = (await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)).strip().lower()
+                if answer == "y":
+                    _auto_approved_categories.clear()
+                    _save_permissions(_auto_approved_categories)
+                    ui.print_success("permissions cleared")
+            else:
+                ui.print_permissions(_auto_approved_categories)
             continue
 
         logger.log_user(user_input)

@@ -39,12 +39,13 @@ PROMPT_STYLE = Style.from_dict({
 })
 
 _SLASH_COMMANDS = [
-    ("/help",    "show help"),
-    ("/clear",   "clear the screen"),
-    ("/new",     "start a fresh session"),
-    ("/history", "show log file paths"),
-    ("/model",   "show active model and backend"),
-    ("/exit",    "quit"),
+    ("/help",        "show help"),
+    ("/clear",       "clear the screen"),
+    ("/new",         "start a fresh session"),
+    ("/history",     "show log file paths"),
+    ("/model",       "show active model and backend"),
+    ("/permissions", "show or clear auto-approved categories"),
+    ("/exit",        "quit"),
 ]
 
 
@@ -185,9 +186,10 @@ def print_help() -> None:
         ("/help",    "show this help"),
         ("/clear",   "clear the screen"),
         ("/new",     "start a fresh session (resets model context)"),
-        ("/history", "show current log file paths"),
-        ("/model",   "show active model and backend"),
-        ("/exit",    "quit"),
+        ("/history",     "show current log file paths"),
+        ("/model",       "show active model and backend"),
+        ("/permissions", "show or clear auto-approved command categories"),
+        ("/exit",        "quit"),
     ]
     for cmd, desc in commands:
         table.add_row(cmd, desc)
@@ -210,6 +212,15 @@ def print_history(jsonl_path, transcript_path) -> None:
 def print_model_info(model: str, base_url: str) -> None:
     console.print(Text(f"  model    {model}", style="dim"))
     console.print(Text(f"  backend  {base_url}", style="dim"))
+    console.print()
+
+
+def print_permissions(categories: set[str]) -> None:
+    if not categories:
+        console.print(Text("  no auto-approved categories", style="dim"))
+    else:
+        for cat in sorted(categories):
+            console.print(Text(f"  + {cat}", style="bold green"))
     console.print()
 
 

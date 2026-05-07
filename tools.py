@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import subprocess
 import sys
@@ -7,6 +8,22 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from ddgs import DDGS
+
+_PERMISSIONS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "permissions.json")
+
+
+def _load_permissions() -> set[str]:
+    try:
+        with open(_PERMISSIONS_FILE) as f:
+            data = json.load(f)
+        return set(data.get("auto_approved", []))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def _save_permissions(categories: set[str]) -> None:
+    with open(_PERMISSIONS_FILE, "w") as f:
+        json.dump({"auto_approved": sorted(categories)}, f, indent=2)
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -163,7 +180,7 @@ _EXECUTE_PATTERNS = [
     r"\b(bash|sh)\s+\S+\.sh\b",                  # bash script.sh
 ]
 
-_auto_approved_categories: set[str] = set()
+_auto_approved_categories: set[str] = _load_permissions()
 
 
 def _command_category(command: str) -> str | None:
@@ -212,6 +229,7 @@ async def terminal(command: str) -> str:
         answer = await confirm_terminal(command, category=category)
         if answer in ("r", "remember") and category != "destructive":
             _auto_approved_categories.add(category)
+            _save_permissions(_auto_approved_categories)
         elif not answer.startswith("y"):
             return "Command cancelled by user."
 
