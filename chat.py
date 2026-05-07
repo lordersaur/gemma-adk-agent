@@ -68,6 +68,7 @@ async def _input_loop(
         cmd = user_input.lower()
 
         if cmd in ("/exit", "/quit"):
+            logger.flush_session()
             ui.write_markup("[dim]bye[/dim]")
             ui.exit_app()
             return

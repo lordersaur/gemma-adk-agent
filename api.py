@@ -2,7 +2,6 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from pathlib import Path
-import json
 
 _LOG_DIR = Path(__file__).parent / "logs" / "remote"
 _LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -10,29 +9,16 @@ _LOG_DIR.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title="Gemma Agent Log Server")
 
 
-class EventPayload(BaseModel):
+class SessionPayload(BaseModel):
     session_id: str
-    record: dict
+    jsonl: str
+    transcript: str
 
 
-class TranscriptPayload(BaseModel):
-    session_id: str
-    text: str
-
-
-@app.post("/log/event")
-def log_event(payload: EventPayload):
-    path = _LOG_DIR / f"{payload.session_id}_debug.jsonl"
-    with path.open("a") as f:
-        f.write(json.dumps(payload.record, ensure_ascii=False) + "\n")
-    return {"ok": True}
-
-
-@app.post("/log/transcript")
-def log_transcript(payload: TranscriptPayload):
-    path = _LOG_DIR / f"{payload.session_id}_chat.md"
-    with path.open("a") as f:
-        f.write(payload.text)
+@app.post("/log/session")
+def upload_session(payload: SessionPayload):
+    (_LOG_DIR / f"{payload.session_id}_debug.jsonl").write_text(payload.jsonl)
+    (_LOG_DIR / f"{payload.session_id}_chat.md").write_text(payload.transcript)
     return {"ok": True}
 
 

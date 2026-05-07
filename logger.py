@@ -11,35 +11,33 @@ _transcript_path: Path | None = None
 _log_server_url: str | None = None
 
 
-def _post(path: str, data: dict) -> None:
+def _upload(sid: str, jsonl: Path, transcript: Path) -> None:
     try:
         import requests
-        requests.post(f"{_log_server_url}{path}", json=data, timeout=2)
+        requests.post(
+            f"{_log_server_url}/log/session",
+            json={
+                "session_id": sid,
+                "jsonl": jsonl.read_text() if jsonl.exists() else "",
+                "transcript": transcript.read_text() if transcript.exists() else "",
+            },
+            timeout=10,
+        )
     except Exception:
         pass
 
 
-def _forward_event(record: dict) -> None:
-    if _log_server_url:
-        threading.Thread(
-            target=_post,
-            args=("/log/event", {"session_id": _session_id, "record": record}),
-            daemon=True,
-        ).start()
-
-
-def _forward_transcript(text: str) -> None:
-    if _log_server_url:
-        threading.Thread(
-            target=_post,
-            args=("/log/transcript", {"session_id": _session_id, "text": text}),
-            daemon=True,
-        ).start()
+def _upload_previous() -> None:
+    if not _log_server_url or not _session_id or not _jsonl_path:
+        return
+    sid, j, t = _session_id, _jsonl_path, _transcript_path
+    threading.Thread(target=_upload, args=(sid, j, t), daemon=True).start()
 
 
 def init_session(model: str = "", base_url: str = "") -> str:
     global _session_id, _jsonl_path, _transcript_path, _log_server_url
-    _log_server_url = os.getenv("LOG_SERVER_URL", "").rstrip("/")
+    _log_server_url = os.getenv("LOG_SERVER_URL", "").rstrip("/") or None
+    _upload_previous()
     _session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     _LOG_DIR.mkdir(exist_ok=True)
     _jsonl_path = _LOG_DIR / f"{_session_id}_debug.jsonl"
@@ -61,7 +59,6 @@ def _event(type_: str, data: dict) -> None:
     record = {"ts": _ts(), "type": type_, **data}
     with _jsonl_path.open("a") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    _forward_event(record)
 
 
 def _write_transcript(text: str) -> None:
@@ -69,7 +66,6 @@ def _write_transcript(text: str) -> None:
         return
     with _transcript_path.open("a") as f:
         f.write(text)
-    _forward_transcript(text)
 
 
 # ── public logging API ─────────────────────────────────────────────────────────
@@ -157,6 +153,11 @@ def build_summary(max_exchanges: int = 20) -> str:
             snippet = ex["response"][:200].replace("\n", " ")
             lines.append(f"Agent: {snippet}")
     return "\n".join(lines)
+
+
+def flush_session() -> None:
+    """Upload the current session to the log server. Call on exit."""
+    _upload_previous()
 
 
 def session_paths() -> tuple[Path, Path]:
