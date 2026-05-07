@@ -1,4 +1,5 @@
 import asyncio
+import re
 import subprocess
 import sys
 import tempfile
@@ -28,15 +29,24 @@ def _fetch_page(url: str, max_chars: int = 4000) -> str:
 
 
 def web_search(query: str, max_results: int = 3) -> str:
-    """Search the web and read the content of the top results.
+    """Search the web by query, or fetch a specific URL directly.
+
+    Pass a full URL (https://...) to read that page. Pass a search query to
+    get previews of the top results — call again with a result URL to read
+    the full article.
 
     Args:
-        query: The search query string.
-        max_results: Number of pages to search and read (default 3).
+        query: Search query string, or a full URL to fetch directly.
+        max_results: Number of results for search mode (default 3).
 
     Returns:
-        Titles, URLs, and full page content for each result.
+        Page content for direct fetches, or titles + previews for searches.
     """
+    query = query.strip()
+    if query.startswith(("http://", "https://")):
+        content = _fetch_page(query)
+        return f"[fetched] {query}\n\n{content}"
+
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
@@ -55,6 +65,13 @@ def web_search(query: str, max_results: int = 3) -> str:
 
 def python(code: str) -> str:
     """Execute Python code and return stdout + stderr.
+
+    IMPORTANT: this tool runs in its own temp directory, not the terminal CWD.
+    Always use absolute paths when writing files: open('/abs/path/file.py', 'w').
+    File content must be a plain triple-quoted string — no f-strings with curly
+    braces (JSX/JSON break encoding), no docstrings inside the content string.
+    If the call errors, retry with corrected code — never claim success on failure.
+    Write files here, then run them via the terminal tool.
 
     Args:
         code: Valid Python source code to execute.
@@ -91,15 +108,31 @@ _terminal_cwd: str | None = None
 
 _CWD_SENTINEL = "__TERMINAL_CWD__:"
 
+_DESTRUCTIVE_PATTERNS = [
+    r"\brm\b.*-[a-z]*r",       # rm -r, rm -rf, rm -fr, etc.
+    r"\brm\b.*\*",             # rm with wildcard
+    r"\brm\b.*/\S",            # rm with absolute path
+    r"git\s+reset\s+--hard",
+    r"git\s+clean\s+-[a-z]*f",
+]
+
+def _is_destructive(command: str) -> bool:
+    low = command.lower()
+    return any(re.search(p, low) for p in _DESTRUCTIVE_PATTERNS)
+
 
 async def terminal(command: str) -> str:
     """Run a shell command and stream output line by line.
 
-    The working directory persists across calls — cd commands carry over to the
-    next tool call just like a real shell session.
-    For interactive CLI tools that prompt for input, pass flags to skip prompts
-    (e.g. --yes, -y, --force).
-    Long-running commands like package installs are allowed up to 3 minutes.
+    CWD persists across calls — cd once and it stays for future calls.
+    Before entering a directory the user mentions by name, run ls -F first to
+    confirm it exists — never assume or create it.
+    Never run ls -R (node_modules overflow) — use ls -F or find -maxdepth 2.
+    Never start dev servers (they block forever) — give the user the command
+    and URL instead (Vite: http://localhost:5173, CRA: http://localhost:3000).
+    Install packages with: python3 -m pip install X (pip is not on PATH).
+    Syntax check: python3 -m py_compile <file> — never claim correct without running.
+    Pass --yes/-y/--force to skip interactive prompts.
 
     Args:
         command: The shell command to execute (runs via bash).
@@ -109,7 +142,16 @@ async def terminal(command: str) -> str:
     """
     global _terminal_cwd
     from rich.live import Live
+    from rich.text import Text
     from ui import console, render_terminal_live
+
+    if _is_destructive(command):
+        console.print(Text(f"  ! destructive command: {command}", style="bold yellow"))
+        console.print(Text("    allow? [y/N] ", style="bold yellow"), end="")
+        loop = asyncio.get_event_loop()
+        answer = await loop.run_in_executor(None, sys.stdin.readline)
+        if answer.strip().lower() != "y":
+            return "Command cancelled by user."
 
     if _terminal_cwd:
         full_command = f"cd {_terminal_cwd!r} && {command}; echo '{_CWD_SENTINEL}'\"$(pwd)\""
