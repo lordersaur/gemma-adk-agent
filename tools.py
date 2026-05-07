@@ -33,9 +33,10 @@ def web_search(query: str, max_results: int = 3) -> str:
 
     TWO MODES:
     - Query mode: returns titles, URLs, and short snippets. Snippets are
-      summaries only — for complete answers (full argument lists, API docs,
-      code examples, article body) you MUST fetch the relevant URL before
-      answering. Never give an incomplete answer when a URL is available.
+      summaries only — always fetch the most relevant URL before answering
+      questions about docs, flags, APIs, or anything requiring a complete list.
+      A snippet mentioning one fact is not a complete answer. If a docs or
+      official URL is in the results, fetch it.
     - URL mode: pass a full URL (https://...) to fetch and read the full page.
 
     Args:
@@ -73,9 +74,10 @@ def python(code: str) -> str:
     braces (JSX/JSON break encoding), no docstrings inside the content string.
     No emojis in file content, print statements, comments, or strings.
     If the call errors, retry with corrected code — never claim success on failure.
-    Never use this tool to run code instead of writing a file — always write to an
-    absolute path first (open('/abs/path/file.py', 'w').write(content)), then run
-    via terminal. The only exception is quick one-off calculations with no output file.
+    Never use this tool to run code instead of writing a file, and never use it
+    to preview or draft code — write directly to the file on the first call.
+    Always write to an absolute path first (open('/abs/path/file.py', 'w').write(content)),
+    then run via terminal. The only exception is quick one-off calculations with no output file.
     After writing a file, use the terminal tool to run python3 -m py_compile <file>
     to check syntax, then run it with python3 <file>. Never use subprocess inside this
     tool to run other scripts — always use the terminal tool for that.
