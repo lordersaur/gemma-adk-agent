@@ -103,9 +103,10 @@ def web_search(query: str, max_results: int = 3) -> str:
 def python(code: str) -> str:
     """Execute Python code and return stdout + stderr.
 
-    IMPORTANT: this tool runs in its own temp directory, not the terminal CWD.
-    Always use absolute paths derived from the CWD in the system prompt, e.g.
-    open('/home/user/project/file.py', 'w') — never invent paths like /abs/ or /path/.
+    IMPORTANT: this tool shares the same CWD as the terminal tool — if you cd'd
+    somewhere in terminal, this tool is already in that directory too.
+    Use relative paths for files in the current directory (open('file.py', 'w')),
+    or absolute paths for clarity — never invent paths like /abs/ or /path/.
     If you need to write into a subdirectory, create it first with os.makedirs(dir, exist_ok=True).
     File content must be a plain triple-quoted string — no f-strings with curly
     braces (JSX/JSON break encoding), no docstrings inside the content string.
@@ -134,6 +135,7 @@ def python(code: str) -> str:
             capture_output=True,
             text=True,
             timeout=60,
+            cwd=_terminal_cwd or None,
         )
         output = result.stdout
         if result.stderr:
