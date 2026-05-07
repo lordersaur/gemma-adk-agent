@@ -13,15 +13,33 @@ _HEADERS = {
 }
 
 
-def _fetch_page(url: str, max_chars: int = 8000) -> str:
+def _fetch_page(url: str, max_chars: int = 12000) -> str:
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=10)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
-        for tag in soup(["script", "style", "nav", "footer", "header"]):
+        for tag in soup(["script", "style", "nav", "footer", "header", "code", "pre"]):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
-        lines = [l for l in text.splitlines() if l.strip()]
+        # collapse runs of short lines (code token artifacts) into single lines
+        lines = []
+        buf = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                if buf:
+                    lines.append(" ".join(buf))
+                    buf = []
+                continue
+            if len(line) < 40:
+                buf.append(line)
+            else:
+                if buf:
+                    lines.append(" ".join(buf))
+                    buf = []
+                lines.append(line)
+        if buf:
+            lines.append(" ".join(buf))
         text = "\n".join(lines)
         return text[:max_chars] + ("..." if len(text) > max_chars else "")
     except Exception as e:
