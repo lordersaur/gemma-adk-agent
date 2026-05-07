@@ -53,12 +53,10 @@ def web_search(query: str, max_results: int = 3) -> str:
         if not results:
             return "No results found."
 
-        sections = []
+        lines = []
         for i, r in enumerate(results, 1):
-            url = r["href"]
-            content = _fetch_page(url)
-            sections.append(f"[{i}] {r['title']}\n{url}\n\n{content}")
-        return "\n\n---\n\n".join(sections)
+            lines.append(f"[{i}] {r['title']}\n{r['href']}\n{r.get('body', '')}")
+        return "\n\n".join(lines)
     except Exception as e:
         return f"Search error: {e}"
 
